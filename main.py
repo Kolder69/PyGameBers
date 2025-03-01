@@ -1,33 +1,19 @@
-import pygame
-import os
 import random
 
-# Настройки экрана
+import pygame
+import os
+
+
 WIDTH, HEIGHT = 1920, 1080
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 DARK_GRAY = (50, 50, 50)
 LIGHT_TEXT = (255, 255, 255)
 DARK_TEXT = (200, 200, 200)
-pygame.init()
-pygame.mixer.init()
-kills = 0
-paused = False
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Игра")
-clock = pygame.time.Clock()
-game_running = False
-
 db_file = "game_database.db"
-
 BACKGROUND_IMAGE_PATH = "back.webp"
-
 MUSIC_FILE_PATH = "back_music.mp3"
-
-def draw_text(text, pos, color=WHITE, font_size=40):
-    font = pygame.font.Font(None, font_size)
-    text_surface = font.render(text, True, color)
-    screen.blit(text_surface, pos)
+GAME_BACK = "back.jpg"
 
 
 class ImageButton:
@@ -49,6 +35,68 @@ class ImageButton:
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.rect.collidepoint(event.pos):
                 self.action()
+
+
+class Player:
+    def __init__(self):
+        self.image = pygame.Surface((50, 100))
+        self.image.fill((0, 0, 255))
+        self.rect = self.image.get_rect(midbottom=(WIDTH // 2, HEIGHT - 50))
+        self.speed = 5
+        self.hp = 100
+        self.max_hp = 100
+        self.damage = 5
+        self.attack_cooldown = 100
+        self.last_attack_time = 0
+
+    def move(self, keys, monsters):
+        dx = 0
+        if keys[pygame.K_a]:
+            dx = -self.speed
+        if keys[pygame.K_d]:
+            dx = self.speed
+
+        self.rect.x += dx
+        for monster in monsters:
+            if self.rect.colliderect(monster.rect):
+                self.rect.x -= dx
+
+    def attack(self, monsters):
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_attack_time >= self.attack_cooldown:
+            self.last_attack_time = current_time
+            attack_rect = pygame.Rect(self.rect.x - self.rect.width * 2, self.rect.y, self.rect.width * 4, self.rect.height)
+            for monster in monsters[:]:
+                if attack_rect.colliderect(monster.rect):
+                    monster.hp -= self.damage
+                    if monster.hp <= 0:
+                        monsters.remove(monster)
+                        return 1
+        return 0
+
+
+class Monster:
+    def __init__(self, x):
+        self.image = pygame.Surface((50, 100))
+        self.image.fill((255, 0, 0))
+        self.rect = self.image.get_rect(midbottom=(x, HEIGHT - 50))
+        self.hp = 10
+        self.damage = 5
+        self.speed = 2
+        self.last_attack_time = 0
+        self.attack_cooldown = 2000
+
+    def move_towards_player(self, player):
+        if self.rect.x < player.rect.x:
+            self.rect.x += self.speed
+        elif self.rect.x > player.rect.x:
+            self.rect.x -= self.speed
+
+    def attack(self, player):
+        current_time = pygame.time.get_ticks()
+        if self.rect.colliderect(player.rect) and current_time - self.last_attack_time >= self.attack_cooldown:
+            self.last_attack_time = current_time
+            player.hp -= self.damage
 
 
 def load_users():
@@ -85,11 +133,10 @@ def main_menu(screen):
                                   register_screen)
     running = True
     while running:
-        draw_background()
+        draw_background(screen)
         login_button.draw(screen)
         register_button.draw(screen)
         pygame.display.flip()
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
@@ -103,31 +150,23 @@ def input_screen(title, prompts):
     pygame.display.set_caption(title)
     font = pygame.font.Font(None, 50)
     inputs = ["" for _ in prompts]
-
     field_width, field_height = 500, 60
     spacing = 100
     start_y = HEIGHT // 2 - (len(prompts) * (field_height + spacing)) // 2
-
     rects = [(WIDTH // 2 - field_width // 2, start_y + i * (field_height + spacing), field_width, field_height)
              for i in range(len(prompts))]
-
     active_idx = 0
-
     running = True
     while running:
-        draw_background()
-
+        draw_background(screen)
         for i, prompt in enumerate(prompts):
             text_surface = font.render(prompt, True, LIGHT_TEXT)
             text_rect = text_surface.get_rect(center=(WIDTH // 2, rects[i][1] - 40))
             screen.blit(text_surface, text_rect)
-
             pygame.draw.rect(screen, LIGHT_TEXT, rects[i], 2)
             input_surface = font.render(inputs[i], True, LIGHT_TEXT)
             screen.blit(input_surface, (rects[i][0] + 10, rects[i][1] + 15))
-
         pygame.display.flip()
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
@@ -150,7 +189,7 @@ def input_screen(title, prompts):
 
 def show_message(screen, message, color, duration=800):
     screen.fill(BLACK)
-    draw_background()
+    draw_background(screen)
     font = pygame.font.Font(None, 60)
     text_surface = font.render(message, True, color)
     text_rect = text_surface.get_rect(center=(WIDTH // 2, HEIGHT // 2))
@@ -163,7 +202,7 @@ def login_screen():
     users = load_users()
     login, password = input_screen("Вход", ["Введите логин:", "Введите пароль:"])
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    draw_background()
+    draw_background(screen)
     if users.get(login) == password:
         show_message(screen, "Вход выполнен!", (0, 255, 0))
         pygame.display.flip()
@@ -177,20 +216,16 @@ def login_screen():
 
 
 def create_main_menu(screen):
-    global game_running
-    button_text = "Начать"
-    start_button = ImageButton(WIDTH // 2, HEIGHT // 2 - 100, "dark_fantasy_button.png", button_text, start_game)
+    start_button = ImageButton(WIDTH // 2, HEIGHT // 2 - 100, "dark_fantasy_button.png", "Начать", start_game)
     settings_button = ImageButton(WIDTH // 2, HEIGHT // 2, "dark_fantasy_button.png", "Настройки", settings_screen)
     exit_button = ImageButton(WIDTH // 2, HEIGHT // 2 + 100, "dark_fantasy_button.png", "Выйти", exit_game)
-
     running = True
     while running:
-        draw_background()
+        draw_background(screen)
         start_button.draw(screen)
         settings_button.draw(screen)
         exit_button.draw(screen)
         pygame.display.flip()
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
@@ -213,10 +248,10 @@ def settings_screen():
                                "Выключить музыку" if music_playing else "Включить музыку", toggle_music)
     volume_slider_rect = pygame.Rect(WIDTH // 4, HEIGHT // 2 + 50, WIDTH // 2, 20)
     volume_slider_thumb = pygame.Rect(WIDTH // 4 + (WIDTH // 2) * (music_volume / 100), HEIGHT // 2 + 40, 20, 40)
-    back_button = ImageButton(WIDTH // 2, HEIGHT // 2 + 150, "dark_fantasy_button.png", "Назад", go_back_to_game)
-
-    while True:
-        draw_background()
+    back_button = ImageButton(WIDTH // 2, HEIGHT // 2 + 150, "dark_fantasy_button.png", "Назад", go_back_to_main_menu)
+    running = True
+    while running:
+        draw_background(screen)
         music_button.text = "Выкл музыку" if music_playing else "Вкл музыку"
         music_button.draw(screen)
         pygame.draw.rect(screen, LIGHT_TEXT, volume_slider_rect)
@@ -224,19 +259,26 @@ def settings_screen():
         draw_text(screen, f"Громкость: {int(music_volume)}%", (WIDTH // 2 - 75, HEIGHT // 2 + 130), LIGHT_TEXT)
         back_button.draw(screen)
         pygame.display.flip()
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 exit()
             music_button.check_click(event)
             back_button.check_click(event)
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                return
-
-
-def go_back_to_game():
-    return
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if volume_slider_rect.collidepoint(event.pos):
+                    music_volume = (event.pos[0] - volume_slider_rect.left) / volume_slider_rect.width * 100
+                    music_volume = max(0, min(music_volume, 100))
+                    pygame.mixer.music.set_volume(music_volume / 100)
+                    volume_slider_thumb.x = volume_slider_rect.left + (volume_slider_rect.width * (music_volume / 100))
+            if event.type == pygame.MOUSEMOTION:
+                if pygame.mouse.get_pressed()[0]:
+                    if volume_slider_rect.collidepoint(event.pos):
+                        music_volume = (event.pos[0] - volume_slider_rect.left) / volume_slider_rect.width * 100
+                        music_volume = max(0, min(music_volume, 100))
+                        pygame.mixer.music.set_volume(music_volume / 100)
+                        volume_slider_thumb.x = volume_slider_rect.left + (
+                                volume_slider_rect.width * (music_volume / 100))
 
 
 def toggle_music():
@@ -255,6 +297,7 @@ def go_back_to_main_menu():
 
 def exit_game():
     pygame.quit()
+
     exit()
 
 
@@ -263,168 +306,95 @@ def register_screen():
     login, password, confirm_password = input_screen("Регистрация",
                                                      ["Придумайте логин:", "Введите пароль:", "Подтвердите пароль:"])
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    draw_background()
+    draw_background(screen)
+
     if login in users:
-        draw_text(screen, "Логин занят!", (200, 250), (255, 0, 0))
+        show_message(screen, "Логин занят!", (255, 0, 0))
     elif password != confirm_password:
-        draw_text(screen, "Пароли не совпадают!", (200, 250), (255, 0, 0))
+        show_message(screen, "Пароли не совпадают!", (255, 0, 0))
     else:
         save_user(login, password)
-        draw_text(screen, "Регистрация успешна!", (200, 250), (0, 255, 0))
-        pygame.display.flip()
-        pygame.time.wait(800)
+        show_message(screen, "Регистрация успешна!", (0, 255, 0))
         main_menu(screen)
 
 
-class Player(pygame.sprite.Sprite):
-    def __init__(self):
-        super().__init__()
-        self.image = pygame.Surface((100, 100))  # Увеличен размер в 2 раза
-        self.image.fill((0, 255, 0))
-        self.rect = self.image.get_rect(center=(WIDTH // 2, HEIGHT - 100))
-        self.hp = 100
-        self.damage = 5
-        self.speed = 5
-        self.attack_cooldown = 0.5
-        self.last_attack_time = 0
-        self.attack_range = self.rect.width * 2  # Атака в 2 раза больше размера
-
-    def attack(self, direction, monsters):
-        global kills
-        now = pygame.time.get_ticks() / 1000
-        if now - self.last_attack_time >= self.attack_cooldown:
-            self.last_attack_time = now
-            for monster in list(monsters):
-                if (direction == "left" and monster.rect.x < self.rect.x and abs(
-                        monster.rect.x - self.rect.x) <= self.attack_range) or \
-                        (direction == "right" and monster.rect.x > self.rect.x and abs(
-                            monster.rect.x - self.rect.x) <= self.attack_range):
-                    monster.hp -= self.damage
-                    if monster.hp <= 0:
-                        monsters.remove(monster)
-                        kills += 1
-
-    def update(self, keys):
-        if keys[pygame.K_a] or keys[pygame.K_LEFT]:
-            self.rect.x -= self.speed
-        if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
-            if not self.rect.colliderect(player.rect):
-                self.rect.x += self.speed
-
-# Классы монстров
-class Monster(pygame.sprite.Sprite):
-    def __init__(self, x, y, hp, damage, speed):
-        super().__init__()
-        self.image = pygame.Surface((80, 80))  # Увеличен размер в 2 раза
-        self.image.fill((255, 0, 0))
-        self.rect = self.image.get_rect(center=(x, y))
-        self.hp = hp
-        self.damage = damage
-        self.speed = speed
-        self.attack_cooldown = 1
-        self.last_attack_time = 0
-
-    def update(self, player):
-        self.rect.x += self.speed
-        if self.rect.colliderect(player.rect):
-            now = pygame.time.get_ticks() / 1000
-            if now - self.last_attack_time >= self.attack_cooldown:
-                self.last_attack_time = now
-                player.hp -= self.damage
+def draw_ui(screen, player, wave, kills, time_elapsed):
+    font = pygame.font.Font(None, 40)
+    hp_text = font.render(f"HP: {player.hp}/{player.max_hp}", True, LIGHT_TEXT)
+    screen.blit(hp_text, (20, 20))
+    wave_text = font.render(f"Wave: {wave}", True, LIGHT_TEXT)
+    screen.blit(wave_text, (20, 60))
+    kills_text = font.render(f"Kills: {kills}", True, LIGHT_TEXT)
+    screen.blit(kills_text, (20, 100))
+    timer_text = font.render(f"Time: {time_elapsed // 1000}s", True, LIGHT_TEXT)
+    screen.blit(timer_text, (20, 140))
 
 
-def pause_menu():
-    global paused
-    paused = True
-    while paused:
-        screen.fill(BLACK)
-        draw_text(screen, "Пауза", (WIDTH // 2 - 50, HEIGHT // 2 - 100))
-        exit_button = ImageButton(WIDTH // 2, HEIGHT // 2, "dark_fantasy_button.png", "Выйти", exit_game)
-        settings_button = ImageButton(WIDTH // 2, HEIGHT // 2 + 100, "dark_fantasy_button.png", "Настройки",
-                                      settings_screen)
-        exit_button.draw(screen)
-        settings_button.draw(screen)
-        pygame.display.flip()
+def game_loop():
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Игра")
+    background = pygame.image.load(GAME_BACK)
+    background = pygame.transform.scale(background, (WIDTH, HEIGHT))
+    player = Player()
+    monsters = []
+    wave = 1
+    monster_count = 5
+    kills = 0
+    wave_timer = pygame.time.get_ticks()
+    running = True
+    clock = pygame.time.Clock()
+    game_over = False
+
+    def spawn_wave():
+        nonlocal monsters, monster_count, wave_timer
+        monsters = [Monster(random.choice([random.randint(0, WIDTH // 3), random.randint(WIDTH * 2 // 3, WIDTH)])) for _ in range(monster_count)]
+        monster_count += 1 if wave < 10 else 3
+        wave_timer = pygame.time.get_ticks()
+
+    spawn_wave()
+
+    while running:
+        screen.blit(background, (0, 0))
+        keys = pygame.key.get_pressed()
+        player.move(keys, monsters)
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 exit()
-            exit_button.check_click(event)
-            settings_button.check_click(event)
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button in (1, 3):
+                    kills += player.attack(monsters)
 
+        if game_over:
+            font = pygame.font.Font(None, 80)
+            text = font.render(f"Вы проиграли! Вы пережили {wave} волн.", True, (255, 0, 0))
+            screen.blit(text, (WIDTH // 3, HEIGHT // 2))
+            pygame.display.flip()
+            pygame.time.wait(3000)
+            return
 
-def spawn_wave(wave):
-    monsters = pygame.sprite.Group()
-    count_walkers = 5 + (wave - 1)  # Каждый новый уровень добавляет 1 монстра
+        for monster in monsters[:]:
+            monster.move_towards_player(player)
+            monster.attack(player)
+            if monster.hp <= 0:
+                monsters.remove(monster)
+                kills += 1
 
-    for _ in range(count_walkers):
-        x = random.choice([-50, WIDTH + 50])
-        monsters.add(Monster(x, HEIGHT - 100, 5, 10, random.choice([-2, 2])))
-
-    return monsters
-
-
-def draw_background():
-    background = pygame.image.load(BACKGROUND_IMAGE_PATH)
-    background = pygame.transform.scale(background, (WIDTH, HEIGHT))
-    screen.blit(background, (0, 0))
-
-
-# Главная игровая функция
-def game_loop():
-    global paused, kills
-    paused = False
-    player = Player()
-    all_sprites = pygame.sprite.Group()
-    all_sprites.add(player)
-    wave = 1
-    kills = 0
-    wave_start_time = pygame.time.get_ticks() / 1000
-    monsters = spawn_wave(wave) or pygame.sprite.Group()
-    running = True
-
-    while running:
-        keys = pygame.key.get_pressed()
-        player.update(keys)
-
-        if paused:
-            pause_menu()
-        draw_background()
-        all_sprites.update(keys)
-        monsters.update(player)
-        all_sprites.draw(screen)
-        monsters.draw(screen)
-
-        elapsed_time = int(pygame.time.get_ticks() / 1000 - wave_start_time)
-        draw_text(screen, f"Волна: {wave}", (20, 20))
-        draw_text(screen, f"Таймер: {elapsed_time}", (20, 60))
-        draw_text(screen, f"Убийства: {kills}", (20, 100))
-        pygame.display.flip()
-
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    paused = True
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == 1:
-                    player.attack("left", monsters)
-                elif event.button == 3:
-                    player.attack("right", monsters)
-
-        if not monsters.sprites():
+        if not monsters:
             wave += 1
-            wave_start_time = pygame.time.get_ticks() / 1000
-            monsters = spawn_wave(wave) or pygame.sprite.Group()
+            spawn_wave()
 
+        if player.hp <= 0:
+            game_over = True
+
+        screen.blit(player.image, player.rect)
+        for monster in monsters:
+            screen.blit(monster.image, monster.rect)
+
+        draw_ui(screen, player, wave, kills, pygame.time.get_ticks())
+        pygame.display.flip()
         clock.tick(60)
-
-
-def toggle_pause():
-    global paused
-    paused = not paused
 
 
 if __name__ == "__main__":
@@ -432,11 +402,9 @@ if __name__ == "__main__":
     pygame.mixer.init()
     music_playing = True
     music_volume = 10
-
     pygame.mixer.music.load(MUSIC_FILE_PATH)
     pygame.mixer.music.set_volume(music_volume / 100)
     pygame.mixer.music.play(-1, 0.0)
-
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("Система входа")
     main_menu(screen)
